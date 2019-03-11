@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.IO.Ports;
 using System.Management;
+using System.IO;
 
 namespace UART_COM
 {
@@ -26,7 +27,7 @@ namespace UART_COM
         private void Form1_Load(object sender, EventArgs e)
         {
             string[] strCom = SerialPort.GetPortNames();
-            if (strCom == null)
+            if (strCom.Length<1)
             {
                 MessageBox.Show("本机没有串口！", "Error");
                 return;
@@ -74,6 +75,8 @@ namespace UART_COM
         }
         DateTime startRevTime, endRevTime;
         int revByteNumAll = 0;
+        FileStream mfileStream;
+        StreamWriter mstreamWriter;
         private void btn_openCom_Click(object sender, EventArgs e)
         {
             //serialPort1.IsOpen
@@ -81,6 +84,12 @@ namespace UART_COM
             {
                 try
                 {
+                    if (isSaveData)
+                    {
+                        string filename = String.Format("uartRev{0:H_mm_ss}.tmp", DateTime.Now);
+                        mfileStream = new FileStream(filename, FileMode.OpenOrCreate, FileAccess.Write);
+                        mstreamWriter = new StreamWriter(mfileStream);
+                    }
                     //设置串口号
                     string serialName = cbBox_PORT.SelectedItem.ToString();
                     uart1.PortName = serialName;
@@ -163,6 +172,11 @@ namespace UART_COM
                 TimeSpan dt = endRevTime - startRevTime;
                 double transDataRate = (double)revByteNumAll / dt.TotalMilliseconds * 1000;
                 AddContent(String.Format("Data Rate:{0}Byte/s,Time is {1}s",transDataRate,dt.TotalSeconds),revByteNumAll);
+                if (isSaveData)
+                {
+                    mstreamWriter.Flush();
+                    mfileStream.Close();
+                }
             }
         }
         private void uart1_DataReceived(object sender, SerialDataReceivedEventArgs e)
@@ -170,7 +184,7 @@ namespace UART_COM
             
             if (uart1.IsOpen)     //判断是否打开串口
             {
-                if (uart1.BytesToRead < 0) return;
+                if (uart1.BytesToRead <=0) return;
                 //输出当前时间
                 try
                 {
@@ -178,19 +192,27 @@ namespace UART_COM
                     revByteNumAll += receiveLen;
                     Byte[] receivedData = new Byte[receiveLen];        //创建接收字节数组
                     uart1.Read(receivedData, 0, receiveLen);         //读取数据
-                    if (isPauseDisplay) return;
+                   
                     string strget="";
                     if (isHexDisplay)
                         strget = BitConverter.ToString(receivedData).Replace("-",string.Empty);
                     else
                         strget = new UTF8Encoding().GetString(receivedData);
-                    if (isTiemDisplay)
+                    String strTime = "";
+                    if (isTimeDisplay)
                     {
                         DateTime dt = DateTime.Now;
-                        txt_Received.Text += String.Format("{0:H:mm:ss:fff,}", dt);
+                        strTime = String.Format("{0:H:mm:ss:fff}", dt);
                     }
-                    AddContent(strget,revByteNumAll);
-                    
+
+                   String strbuf= String.Concat(strget," ",strTime);
+                   if(isSaveData) mstreamWriter.WriteLine(strbuf);
+
+                    if (isPauseDisplay) return;
+                    if (isRevByteDis)
+                        AddContent(String.Format("{0},{1}", receiveLen, strbuf),revByteNumAll);
+                    else
+                        AddContent(strbuf, revByteNumAll);
                 }
                 catch (System.Exception ex)
                 {
@@ -210,8 +232,7 @@ namespace UART_COM
             this.BeginInvoke(new MethodInvoker(delegate
             {
                 txt_Received.AppendText(content);
-                txt_Received.AppendText("\r\n");
-                //记录收到的字符个数
+                if(isNewLine)txt_Received.AppendText("\r\n");
                 lbl_RevCount.Text = (bufLen).ToString();
             }));
         }
@@ -241,6 +262,7 @@ namespace UART_COM
         private void cbBox_PORT_MouseHover(object sender, EventArgs e)
         {
             string ss = cbBox_PORT.Text;
+            if (ss.Length <1) return;
             int i1= port_names.IndexOf(ss);
             ToolTip toolTip = new ToolTip();
             toolTip.AutoPopDelay = 5000;
@@ -253,14 +275,17 @@ namespace UART_COM
         private void btn_clearRev_Click(object sender, EventArgs e)
         {
             txt_Received.Clear();
+            revByteNumAll = 0;
+            startRevTime = DateTime.Now;
         }
 
         private void btn_refresh_Uart_Click(object sender, EventArgs e)
         {
             string[] strCom = SerialPort.GetPortNames();
-            if (strCom == null)
+            if (strCom.Length <1)
             {
                 MessageBox.Show("本机没有串口！", "Error");
+                cbBox_PORT.Items.Clear();
                 return;
             }
             //通过WMI获取COM端口
@@ -285,12 +310,45 @@ namespace UART_COM
         {
             isHexDisplay = ckBox_HexDis.Checked;
         }
-        bool isTiemDisplay = false;
+        bool isTimeDisplay = false;
         private void ckBox_disTime_CheckedChanged(object sender, EventArgs e)
         {
-            isTiemDisplay = ckBox_disTime.Checked;
+            isTimeDisplay = ckBox_disTime.Checked;
         }
+
+        bool isRevByteDis = false;
+        private void ckBox_disRevByte_CheckedChanged(object sender, EventArgs e)
+        {
+            isRevByteDis = ckBox_disRevByte.Checked;
+        }
+
         bool isPauseDisplay = false;
+
+        private void txt_clearDis_Click(object sender, EventArgs e)
+        {
+            txt_Received.Clear();
+            revByteNumAll = 0;
+            startRevTime = DateTime.Now;
+        }
+
+        private void linkLab_clearRevDis_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+        {
+            txt_Received.Clear();
+            revByteNumAll = 0;
+            startRevTime = DateTime.Now;
+        }
+
+        bool isSaveData = false;
+        private void ckBox_savData_CheckedChanged(object sender, EventArgs e)
+        {
+            isSaveData = ckBox_savData.Checked;
+        }
+        bool isNewLine = false;
+        private void ckBox_newline_CheckedChanged(object sender, EventArgs e)
+        {
+            isNewLine = ckBox_newline.Checked;
+        }
+
         private void ckBox_pauseRev_CheckedChanged(object sender, EventArgs e)
         {
             isPauseDisplay = ckBox_pauseRev.Checked;
